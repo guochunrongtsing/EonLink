@@ -17,33 +17,51 @@ export async function checkNvidiaAvailability(): Promise<boolean> {
   }
 }
 
-async function callNvidia(messages: any[]) {
-  const response = await fetch(NVIDIA_PROXY_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "meta/llama-3.1-70b-instruct", // Updated to a more standard model name
-      messages,
-      temperature: 0.2,
-      top_p: 0.7,
-      max_tokens: 1024,
-    }),
-  });
+async function callNvidia(messages: any[], retries = 3) {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const response = await fetch(NVIDIA_PROXY_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "meta/llama-3.1-70b-instruct",
+          messages,
+          temperature: 0.2,
+          top_p: 0.7,
+          max_tokens: 1024,
+        }),
+      });
 
-  const responseText = await response.text();
-  if (!response.ok) {
-    throw new Error(`NVIDIA Proxy Error: ${response.status} - ${responseText}`);
-  }
+      const responseText = await response.text();
 
-  try {
-    const data = JSON.parse(responseText);
-    return data.choices[0].message.content;
-  } catch (e) {
-    console.error("Failed to parse NVIDIA proxy response as JSON:", responseText);
-    throw new Error(`NVIDIA Parse Error: ${responseText}`);
+      if (response.status === 429 && attempt < retries - 1) {
+        const waitTime = Math.pow(2, attempt + 1) * 1000;
+        console.warn(`NVIDIA 429 (Too Many Requests). Retrying in ${waitTime}ms... (Attempt ${attempt + 1}/${retries})`);
+        await new Promise(r => setTimeout(r, waitTime));
+        continue;
+      }
+
+      if (!response.ok) {
+        throw new Error(`NVIDIA Proxy Error: ${response.status} - ${responseText}`);
+      }
+
+      const data = JSON.parse(responseText);
+      return data.choices[0].message.content;
+    } catch (e: any) {
+      lastError = e;
+      if (attempt < retries - 1) {
+        const waitTime = Math.pow(2, attempt + 1) * 1000;
+        await new Promise(r => setTimeout(r, waitTime));
+        continue;
+      }
+    }
   }
+  
+  throw lastError || new Error("NVIDIA call failed after retries");
 }
 
 export async function decomposeTaskNvidia(prompt: string, environmentState: string, correctionContext?: string): Promise<Action[]> {
