@@ -83,10 +83,12 @@ async function testConnection() {
   await getFirebase();
   if (!db) return;
   try {
+    // Attempt a lightweight server-side fetch to verify connectivity
     await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if(error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration.");
+  } catch (error: any) {
+    if (error.message?.includes('the client is offline') || error.code === 'unavailable') {
+      console.warn("Firestore is currently unreachable. The app will operate in offline mode.");
+      console.info("If this is a new project, please ensure you have provisioned the database using the 'set_up_firebase' tool.");
     }
   }
 }

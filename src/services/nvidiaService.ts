@@ -5,22 +5,26 @@ export interface Action {
   description: string;
 }
 
-const NVIDIA_API_KEY = import.meta.env.VITE_NVIDIA_API_KEY;
-const NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
+const NVIDIA_PROXY_URL = "/api/nvidia";
+
+export async function checkNvidiaAvailability(): Promise<boolean> {
+  try {
+    const res = await fetch("/api/config");
+    const data = await res.json();
+    return !!data.hasNvidia;
+  } catch {
+    return false;
+  }
+}
 
 async function callNvidia(messages: any[]) {
-  if (!NVIDIA_API_KEY) {
-    throw new Error("NVIDIA_API_KEY is not defined");
-  }
-
-  const response = await fetch(NVIDIA_BASE_URL, {
+  const response = await fetch(NVIDIA_PROXY_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${NVIDIA_API_KEY}`,
     },
     body: JSON.stringify({
-      model: "meta/llama3-70b-instruct", // or any available NVIDIA NIM model
+      model: "meta/llama-3.1-70b-instruct", // Updated to a more standard model name
       messages,
       temperature: 0.2,
       top_p: 0.7,
@@ -28,13 +32,18 @@ async function callNvidia(messages: any[]) {
     }),
   });
 
+  const responseText = await response.text();
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`NVIDIA API Error: ${response.status} - ${errorText}`);
+    throw new Error(`NVIDIA Proxy Error: ${response.status} - ${responseText}`);
   }
 
-  const data = await response.json();
-  return data.choices[0].message.content;
+  try {
+    const data = JSON.parse(responseText);
+    return data.choices[0].message.content;
+  } catch (e) {
+    console.error("Failed to parse NVIDIA proxy response as JSON:", responseText);
+    throw new Error(`NVIDIA Parse Error: ${responseText}`);
+  }
 }
 
 export async function decomposeTaskNvidia(prompt: string, environmentState: string): Promise<Action[]> {

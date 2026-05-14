@@ -1,15 +1,18 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { decomposeTask as geminiDecompose, simulateAction as geminiSimulate, Action } from '../services/geminiService';
-import { decomposeTaskNvidia, simulateActionNvidia } from '../services/nvidiaService';
+import { decomposeTaskNvidia, simulateActionNvidia, checkNvidiaAvailability } from '../services/nvidiaService';
 import { logTask } from '../services/firebaseService';
-
-const HAS_NVIDIA = !!import.meta.env.VITE_NVIDIA_API_KEY;
 
 export function useAgent() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentActions, setCurrentActions] = useState<Action[]>([]);
   const [simulationResult, setSimulationResult] = useState<any>(null);
   const [isAborted, setIsAborted] = useState(false);
+  const [hasNvidia, setHasNvidia] = useState(false);
+
+  useEffect(() => {
+    checkNvidiaAvailability().then(setHasNvidia);
+  }, []);
   
   const stopProcess = () => {
     setIsAborted(true);
@@ -23,6 +26,11 @@ export function useAgent() {
   ) => {
     setIsProcessing(true);
     setIsAborted(false);
+    
+    // Check again in case it changed
+    const activeNvidia = await checkNvidiaAvailability();
+    setHasNvidia(activeNvidia);
+
     let taskRecord: any = {
       instruction: command,
       status: 'pending',
@@ -33,10 +41,10 @@ export function useAgent() {
 
     try {
       // Step 1: Decomposition
-      onProgress(HAS_NVIDIA ? "Analyzing command with NVIDIA NIM..." : "Analyzing command with Gemini...", 1);
+      onProgress(activeNvidia ? "Analyzing command with NVIDIA NIM..." : "Analyzing command with Gemini...", 1);
       taskRecord.status = 'simulating';
       
-      const actions = HAS_NVIDIA 
+      const actions = activeNvidia 
         ? await decomposeTaskNvidia(command, envState) 
         : await geminiDecompose(command, envState);
         
@@ -46,7 +54,7 @@ export function useAgent() {
       taskRecord.actionSequence = actions;
       
       // Step 2: Simulation
-      onProgress(HAS_NVIDIA ? "Running NVIDIA World Model simulation..." : "Running Gemini World Model simulation...", 2);
+      onProgress(activeNvidia ? "Running NVIDIA World Model simulation..." : "Running Gemini World Model simulation...", 2);
       let overallSuccess = true;
       const simLogs = [];
       
@@ -54,7 +62,7 @@ export function useAgent() {
         if (isAborted) throw new Error("PROCESS_KILLED");
         
         onProgress(`Simulating: ${action.description}...`, 2);
-        const res = HAS_NVIDIA 
+        const res = activeNvidia 
           ? await simulateActionNvidia(action, envState)
           : await geminiSimulate(action, envState);
           
@@ -122,6 +130,7 @@ export function useAgent() {
     processCommand,
     stopProcess,
     isProcessing,
+    hasNvidia,
     currentActions,
     simulationResult
   };

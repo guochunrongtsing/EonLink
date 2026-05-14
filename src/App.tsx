@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
-import { Canvas } from '@react-three/fiber';
+import { Canvas, useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
 import { useAgent } from './hooks/useAgent';
 import { auth, getFirebase } from './services/firebaseService';
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, setPersistence, browserLocalPersistence } from 'firebase/auth';
@@ -52,9 +53,31 @@ const Panel = ({ title, icon: Icon, children, className }: any) => (
   </div>
 );
 
-const RobotModel = ({ position = [0, 0, 0], isSimulating = false }: any) => {
+const SmoothGroup = ({ position = [0, 0, 0], children, ...props }: any) => {
+  const ref = useRef<THREE.Group>(null!);
+  const targetPos = useRef(new THREE.Vector3(...position));
+  const [lastTime, setLastTime] = useState(0);
+  const FPS = 30;
+  const interval = 1000 / FPS;
+
+  useEffect(() => {
+    targetPos.current.set(position[0], position[1], position[2]);
+  }, [position]);
+
+  useFrame((state) => {
+    const time = state.clock.getElapsedTime() * 1000;
+    if (time - lastTime >= interval) {
+      ref.current.position.lerp(targetPos.current, 0.15);
+      setLastTime(time);
+    }
+  });
+
+  return <group ref={ref} {...props}>{children}</group>;
+};
+
+const RobotModel = ({ isSimulating = false }: any) => {
   return (
-    <group position={position}>
+    <group>
       {/* Basic Robot Representation */}
       <mesh position={[0, 0.5, 0]} castShadow>
         <boxGeometry args={[0.5, 1, 0.3]} />
@@ -90,7 +113,7 @@ const RobotModel = ({ position = [0, 0, 0], isSimulating = false }: any) => {
 };
 
 export default function App() {
-  const { processCommand, stopProcess, isProcessing: isAgentProcessing } = useAgent();
+  const { processCommand, stopProcess, isProcessing: isAgentProcessing, hasNvidia } = useAgent();
   const [messages, setMessages] = useState<any[]>([]);
   const [input, setInput] = useState("");
   const [activeStep, setActiveStep] = useState(0); 
@@ -215,7 +238,7 @@ export default function App() {
           <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-50 border border-slate-200">
             <Cpu className="w-3 h-3 text-indigo-500" />
             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">
-              Engine: {!!import.meta.env.VITE_NVIDIA_API_KEY ? "NVIDIA NIM" : "Gemini 2.0"}
+              Engine: {hasNvidia ? "NVIDIA NIM" : "Gemini 2.0"}
             </span>
           </div>
 
@@ -364,13 +387,12 @@ export default function App() {
                   cellColor="#e2e8f0" 
                 />
                 
-                <RobotModel 
-                  position={robotPos} 
-                  isSimulating={activeStep === 2} 
-                />
+                <SmoothGroup position={robotPos}>
+                  <RobotModel isSimulating={activeStep === 2} />
+                </SmoothGroup>
                 
                 {/* Simulated Objects */}
-                <group position={effectiveCupPos}>
+                <SmoothGroup position={effectiveCupPos}>
                   <mesh castShadow>
                     <cylinderGeometry args={[0.15, 0.12, 0.4, 32]} />
                     <meshStandardMaterial color="#ef4444" roughness={0.3} metalness={0.2} />
@@ -379,7 +401,7 @@ export default function App() {
                      <torusGeometry args={[0.08, 0.02, 16, 100, Math.PI]} />
                      <meshStandardMaterial color="#ef4444" />
                   </mesh>
-                </group>
+                </SmoothGroup>
                 
                 {/* Tables */}
                 <group position={[2, 0.05, 1]}>
@@ -409,7 +431,7 @@ export default function App() {
             {/* Viewport HUD */}
             <div className="absolute top-4 right-4 flex flex-col gap-2">
               <div className="px-2 py-1 rounded bg-white/80 backdrop-blur border border-slate-200 text-[10px] font-mono text-slate-500 shadow-sm">
-                FPS: 60
+                FPS: 30
               </div>
               <div className="px-2 py-1 rounded bg-white/80 backdrop-blur border border-slate-200 text-[10px] font-mono text-slate-500 shadow-sm">
                 LATENCY: 12ms
