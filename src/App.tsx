@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useAgent } from './hooks/useAgent';
+import { identifyObjects, type DetectedObject } from './services/perceptionService';
 import { auth, getFirebase } from './services/firebaseService';
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { OrbitControls, Grid, PerspectiveCamera, Environment, Stars } from '@react-three/drei';
@@ -24,6 +25,9 @@ import {
   LogIn,
   LogOut,
   XCircle,
+  Eye,
+  Camera,
+  Scan,
   User as UserIcon
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
@@ -75,6 +79,22 @@ const SmoothGroup = ({ position = [0, 0, 0], children, ...props }: any) => {
   return <group ref={ref} {...props}>{children}</group>;
 };
 
+const DetectedObjectMesh = ({ object }: { object: DetectedObject }) => {
+  return (
+    <group position={object.position}>
+      <mesh castShadow>
+        <boxGeometry args={[0.3, 0.3, 0.3]} />
+        <meshStandardMaterial color="#6366f1" emissive="#6366f1" emissiveIntensity={0.2} transparent opacity={0.6} />
+      </mesh>
+      <mesh position={[0, 0.4, 0]}>
+        <sphereGeometry args={[0.05]} />
+        <meshStandardMaterial color="#10b981" />
+      </mesh>
+      {/* Label billboard would be nice but simple box for now */}
+    </group>
+  );
+};
+
 const RobotModel = ({ isSimulating = false }: any) => {
   return (
     <group>
@@ -121,6 +141,13 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
 
+  // --- Perception State ---
+  const [detectedObjects, setDetectedObjects] = useState<DetectedObject[]>([]);
+  const [isScanning, setIsScanning] = useState(false);
+  const [cameraActive, setCameraActive] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
   // --- World Model State ---
   const [robotPos, setRobotPos] = useState<[number, number, number]>([0, 0, 0]);
   const [isCarrying, setIsCarrying] = useState(false);
@@ -164,6 +191,62 @@ export default function App() {
   
   const addLog = (msg: string) => setLogs(prev => [...prev.slice(-15), `[${new Date().toLocaleTimeString()}] ${msg}`]);
 
+  const toggleCamera = async () => {
+    if (cameraActive) {
+      if (videoRef.current?.srcObject) {
+        const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
+        tracks.forEach(track => track.stop());
+        videoRef.current.srcObject = null;
+      }
+      setCameraActive(false);
+      addLog("Camera stream terminated.");
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+        setCameraActive(true);
+        addLog("Camera stream established.");
+      } catch (err) {
+        addLog("Error: Camera access denied.");
+      }
+    }
+  };
+
+  const scanEnvironment = async () => {
+    if (!cameraActive || !videoRef.current || !canvasRef.current) {
+      addLog("Error: Camera not active for scan.");
+      return;
+    }
+
+    setIsScanning(true);
+    addLog("VISION: Capturing environment frame...");
+
+    try {
+      const canvas = canvasRef.current;
+      const video = videoRef.current;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const base64 = canvas.toDataURL('image/jpeg').split(',')[1];
+        
+        addLog("VISION: Invoking multimodal reasoning engine...");
+        const objects = await identifyObjects(base64);
+        
+        setDetectedObjects(objects);
+        addLog(`VISION: Detected ${objects.length} objects in sector.`);
+        objects.forEach(obj => addLog(` - ${obj.label} at (${obj.position.map(n => n.toFixed(1)).join(',')})`));
+      }
+    } catch (err) {
+      addLog(`VISION: Perception failure: ${err}`);
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
   const handleAbort = () => {
     stopProcess();
     addLog("OPERATOR_INTERVENTION: Kill signal sent to Agent Core.");
@@ -179,28 +262,40 @@ export default function App() {
     
     const result = await processCommand(
       currentInput, 
-      `Robot at (${robotPos.join(',')}). Red cup at (${cupPos.join(',')}). Simulation table at (2,0,1).`, 
+      `Robot at (${robotPos.join(',')}). Physical markers: Red cup at (${cupPos.join(',')}), Simulation table at (2,0,1, and -2,0,-2).`, 
+      detectedObjects,
       (msg, step) => {
         addLog(msg);
         setActiveStep(step);
       },
       (action) => {
-        // Simple heuristic for visual simulation
-        const desc = action.description.toLowerCase();
-        if (desc.includes("move") || desc.includes("go to") || desc.includes("navigate")) {
+        // Response to the decomposed actions
+        const params = action.params as any;
+        const skill = action.skill;
+
+        if (skill === "navigate_to" && params.x !== undefined) {
+          setRobotPos([params.x, params.y || 0, params.z]);
+          addLog(`HARDWARE: Moving to vector (${params.x}, ${params.y}, ${params.z})`);
+        } else if (skill === "navigate_to") {
+          // Fallback legacy heuristic
+          const desc = action.description.toLowerCase();
           if (desc.includes("cup") || desc.includes("red")) {
             setRobotPos([1.5, 0, 0.8]); 
-          } else if (desc.includes("other") || desc.includes("table") || desc.includes("destination") || desc.includes("(-2")) {
+          } else if (desc.includes("table") || desc.includes("destination")) {
             setRobotPos([-1.5, 0, -1.8]); 
-          } else {
-            setRobotPos([0, 0, 0]); 
           }
         }
-        if (desc.includes("pick") || desc.includes("take") || desc.includes("grasp") || desc.includes("lift")) {
+
+        if (skill === "pick_up") {
           addLog("AGENT: Actuating end-effector...");
           setIsCarrying(true);
         }
-        if (desc.includes("place") || desc.includes("put") || desc.includes("drop")) {
+
+        if (skill === "place_at" && params.x !== undefined) {
+          addLog("AGENT: Releasing object at target...");
+          setIsCarrying(false);
+          setCupPos([params.x, params.y || 0.25, params.z]);
+        } else if (skill === "place_at") {
           addLog("AGENT: Releasing object...");
           setIsCarrying(false);
           setCupPos([robotPos[0] + 0.5, 0.25, robotPos[2] + 0.2]);
@@ -390,6 +485,13 @@ export default function App() {
                 <SmoothGroup position={robotPos}>
                   <RobotModel isSimulating={activeStep === 2} />
                 </SmoothGroup>
+
+                {/* Detected Objects Mapping */}
+                {detectedObjects.map(obj => (
+                  <SmoothGroup key={obj.id} position={obj.position}>
+                    <DetectedObjectMesh object={obj} />
+                  </SmoothGroup>
+                ))}
                 
                 {/* Simulated Objects */}
                 <SmoothGroup position={effectiveCupPos}>
@@ -439,14 +541,55 @@ export default function App() {
             </div>
             
             <div className="absolute bottom-4 left-4 flex gap-4">
+               <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/80 backdrop-blur border border-slate-200 shadow-sm transition-all hover:bg-white cursor-pointer" onClick={toggleCamera}>
+                 <Camera className={cn("w-4 h-4", cameraActive ? "text-indigo-500" : "text-slate-400")} />
+                 <div className="flex flex-col">
+                   <span className="text-[8px] uppercase text-slate-400 font-bold tracking-tight">Camera Feed</span>
+                   <span className="text-[10px] font-bold text-slate-900 italic">{cameraActive ? "LIVE STREAM" : "OFFLINE"}</span>
+                 </div>
+               </div>
+
+               {cameraActive && (
+                 <button 
+                  onClick={scanEnvironment}
+                  disabled={isScanning}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-indigo-600 text-white shadow-sm hover:bg-indigo-700 transition-all disabled:opacity-50"
+                 >
+                   {isScanning ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Scan className="w-4 h-4" />}
+                   <span className="text-[10px] font-bold uppercase tracking-tight">Perceptual Scan</span>
+                 </button>
+               )}
+
                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/80 backdrop-blur border border-slate-200 shadow-sm">
                  <Database className="w-4 h-4 text-indigo-500" />
                  <div className="flex flex-col">
                    <span className="text-[8px] uppercase text-slate-400 font-bold tracking-tight">Skill Matrix</span>
-                   <span className="text-[10px] font-bold text-slate-900 italic">128 ACTIVE NODES</span>
+                   <span className="text-[10px] font-bold text-slate-900 italic">{detectedObjects.length > 0 ? `${detectedObjects.length} OBJECTS REGISTERED` : "128 ACTIVE NODES"}</span>
                  </div>
                </div>
             </div>
+
+            {/* Hidden Video/Canvas for vision processing */}
+            <video ref={videoRef} autoPlay playsInline className="hidden" />
+            <canvas ref={canvasRef} className="hidden" />
+
+            {/* Picture-in-picture camera preview */}
+            {cameraActive && (
+              <div className="absolute top-4 left-4 w-32 aspect-video rounded-lg border-2 border-white shadow-xl overflow-hidden bg-black z-10">
+                <video 
+                  autoPlay 
+                  playsInline 
+                  muted 
+                  className="w-full h-full object-cover"
+                  ref={(el) => {
+                    if (el && videoRef.current?.srcObject) {
+                      el.srcObject = videoRef.current.srcObject;
+                    }
+                  }}
+                />
+                <div className="absolute top-1 left-1 px-1 rounded bg-rose-500/80 text-[6px] text-white font-bold uppercase">REC</div>
+              </div>
+            )}
           </Panel>
 
           {/* Lower Terminal */}
@@ -468,6 +611,22 @@ export default function App() {
         <div className="w-80 flex flex-col gap-4">
           <Panel title="Hardware Status" icon={Activity} className="h-1/2">
             <div className="space-y-4">
+              {detectedObjects.length > 0 && (
+                <div className="mb-4">
+                  <h4 className="text-[9px] font-bold uppercase text-indigo-600 mb-2 flex items-center gap-1">
+                    <Eye className="w-3 h-3" /> Visual Perception Buffer
+                  </h4>
+                  <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
+                    {detectedObjects.map(obj => (
+                      <div key={obj.id} className="flex items-center justify-between p-1.5 bg-indigo-50 rounded border border-indigo-100">
+                        <span className="text-[9px] font-bold text-indigo-700 truncate">{obj.label}</span>
+                        <span className="text-[8px] font-mono text-indigo-400">({obj.position.map(n => n.toFixed(1)).join(',')})</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center justify-between">
                 <span className="text-xs text-slate-500 font-medium">CPU Usage</span>
                 <span className="text-xs text-indigo-600 font-bold">24%</span>

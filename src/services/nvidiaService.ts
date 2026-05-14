@@ -52,16 +52,19 @@ export async function decomposeTaskNvidia(prompt: string, environmentState: stri
     Given a user instruction and the current environment state, decompose the task into a sequence of atomic actions.
     
     Available Skills:
-    - navigate_to(location: string)
+    - navigate_to(x: number, y: number, z: number)
     - pick_up(object_id: string)
-    - place_at(location: string)
+    - place_at(x: number, y: number, z: number)
     - open(object_id: string)
     - close(object_id: string)
     
     Environment State: ${environmentState}
     
+    CRITICAL: If the user asks to move to a detected object, use its EXACT coordinates provided in the "Detected Objects Positions" list.
+    
     Output ONLY a JSON array of actions with this schema:
-    [{ "skill": string, "params": {}, "description": string }]
+    [{ "skill": string, "params": { "x"?: number, "y"?: number, "z"?: number, "object_id"?: string }, "description": string }]
+    Example: { "skill": "navigate_to", "params": { "x": 1.2, "y": 0, "z": 3.4 }, "description": "Moving to sensed bed" }
   `;
 
   try {

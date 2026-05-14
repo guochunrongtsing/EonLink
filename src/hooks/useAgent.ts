@@ -21,6 +21,7 @@ export function useAgent() {
   const processCommand = async (
     command: string, 
     envState: string, 
+    detectedObjects: any[],
     onProgress: (msg: string, step: number) => void,
     onActionSimulated?: (action: Action, result: any) => void
   ) => {
@@ -36,7 +37,8 @@ export function useAgent() {
       status: 'pending',
       actionSequence: [],
       simulationLogs: [],
-      result: ''
+      result: '',
+      detectedContext: detectedObjects
     };
 
     try {
@@ -45,8 +47,8 @@ export function useAgent() {
       taskRecord.status = 'simulating';
       
       const actions = activeNvidia 
-        ? await decomposeTaskNvidia(command, envState) 
-        : await geminiDecompose(command, envState);
+        ? await decomposeTaskNvidia(command, `${envState}\nDetected Objects Positions: ${JSON.stringify(detectedObjects)}`) 
+        : await geminiDecompose(command, `${envState}\nDetected Objects Positions: ${JSON.stringify(detectedObjects)}`);
         
       if (isAborted) throw new Error("PROCESS_KILLED");
 
