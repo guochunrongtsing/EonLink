@@ -126,7 +126,7 @@ const RobotModel = ({ isSimulating = false, isCarrying = false }: any) => {
       </mesh>
 
       {/* 3-Segmented Arm (Right) */}
-      <group position={[0.25, 1.1, 0]} rotation={[isCarrying ? -0.8 : 0.2, 0, 0]}>
+      <group position={[0.25, 1.1, 0]} rotation={[isCarrying ? -0.7 : 0.2, -0.2, 0]}>
         {/* Upper Arm */}
         <mesh position={[0.1, -0.15, 0]} castShadow>
           <capsuleGeometry args={[0.05, 0.3, 4, 8]} />
@@ -134,7 +134,7 @@ const RobotModel = ({ isSimulating = false, isCarrying = false }: any) => {
         </mesh>
         
         {/* Forearm */}
-        <group position={[0.1, -0.3, 0]} rotation={[isCarrying ? -0.5 : 0.5, 0, 0]}>
+        <group position={[0.1, -0.3, 0]} rotation={[isCarrying ? -1.2 : 0.5, 0.4, 0]}>
           <mesh position={[0, -0.15, 0]} castShadow>
             <capsuleGeometry args={[0.04, 0.3, 4, 8]} />
             <meshStandardMaterial color="#555" />
@@ -404,9 +404,9 @@ export default function App() {
     setActiveStep(0);
   };
 
-  // Sync cup position with robot if carrying
+  // Sync cup position with robot if carrying - Positioned at palm/chest height
   const effectiveCupPos: [number, number, number] = isCarrying 
-    ? [robotPos[0], robotPos[1] + 1.2, robotPos[2] + 0.3] // Parent to robot's "arm" height
+    ? [robotPos[0] + 0.15, robotPos[1] + 0.9, robotPos[2] + 0.4] 
     : cupPos;
 
   return (
