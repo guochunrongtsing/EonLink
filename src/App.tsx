@@ -305,6 +305,29 @@ export default function App() {
 
     if (result.success) {
       setMessages(prev => [...prev, { role: 'assistant', content: "Task executed successfully in both virtual and physical environments." }]);
+      
+      // --- ROS 2 BROADCAST SIMULATION ---
+      const ros2Msg = {
+        header: {
+          stamp: { sec: Math.floor(Date.now() / 1000), nanosec: (Date.now() % 1000) * 1000000 },
+          frame_id: "map"
+        },
+        task_id: `eonlink_${Math.random().toString(36).substr(2, 9)}`,
+        action_sequence: (result as any).actions.map((action: any) => ({
+          action_type: action.skill,
+          goal: action.params,
+          metadata: {
+            description: action.description,
+            simulated: true
+          }
+        }))
+      };
+
+      addLog("ROS2_BRIDGE: Broadcasting ActionSequence to /agent/action_queue");
+      addLog(`ROS2_PAYLOAD: ${JSON.stringify(ros2Msg)}`);
+      console.log("ROS 2 Broadcast Payload:", ros2Msg);
+      // ----------------------------------
+
     } else {
       setMessages(prev => [...prev, { role: 'assistant', content: "Task failed during simulation. Please refine the instruction." }]);
     }
