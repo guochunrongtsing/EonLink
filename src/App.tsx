@@ -80,9 +80,39 @@ const SmoothGroup = ({ position = [0, 0, 0], children, ...props }: any) => {
 };
 
 const DetectedObjectMesh = ({ object }: { object: DetectedObject }) => {
+  const isPerson = object.label.toLowerCase().includes('person');
+
+  if (isPerson) {
+    return (
+      <group position={[object.position[0], 0, object.position[2]]}>
+        {/* Legs / Lower Body */}
+        <mesh position={[0, 0.45, 0]} castShadow>
+          <capsuleGeometry args={[0.15, 0.6, 4, 8]} />
+          <meshStandardMaterial color="#334155" />
+        </mesh>
+        {/* Torso */}
+        <mesh position={[0, 1.1, 0]} castShadow>
+          <capsuleGeometry args={[0.2, 0.7, 4, 8]} />
+          <meshStandardMaterial color="#475569" />
+        </mesh>
+        {/* Head */}
+        <mesh position={[0, 1.65, 0]} castShadow>
+          <sphereGeometry args={[0.14]} />
+          <meshStandardMaterial color="#94a3b8" />
+        </mesh>
+        {/* Visibility indicator */}
+        <mesh position={[0, 1.9, 0]}>
+          <cylinderGeometry args={[0.01, 0.05, 0.2]} />
+          <meshStandardMaterial color="#10b981" />
+        </mesh>
+      </group>
+    );
+  }
+
   return (
     <group position={object.position}>
-      <mesh castShadow>
+      {/* Offset the mesh so the bottom is at y=0 relative to the group position */}
+      <mesh position={[0, 0.15, 0]} castShadow>
         <boxGeometry args={[0.3, 0.3, 0.3]} />
         <meshStandardMaterial color="#6366f1" emissive="#6366f1" emissiveIntensity={0.2} transparent opacity={0.6} />
       </mesh>
@@ -90,7 +120,6 @@ const DetectedObjectMesh = ({ object }: { object: DetectedObject }) => {
         <sphereGeometry args={[0.05]} />
         <meshStandardMaterial color="#10b981" />
       </mesh>
-      {/* Label billboard would be nice but simple box for now */}
     </group>
   );
 };
