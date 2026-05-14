@@ -41,60 +41,86 @@ export function useAgent() {
       detectedContext: detectedObjects
     };
 
-    try {
-      // Step 1: Decomposition
-      onProgress(activeNvidia ? "Analyzing command with NVIDIA NIM..." : "Analyzing command with Gemini...", 1);
-      taskRecord.status = 'simulating';
-      
-      const actions = activeNvidia 
-        ? await decomposeTaskNvidia(command, `${envState}\nDetected Objects Positions: ${JSON.stringify(detectedObjects)}`) 
-        : await geminiDecompose(command, `${envState}\nDetected Objects Positions: ${JSON.stringify(detectedObjects)}`);
-        
-      if (isAborted) throw new Error("PROCESS_KILLED");
+    let overallSuccess = false;
+    let retryCount = 0;
+    let correctionContext = "";
+    const MAX_RETRIES = 3;
 
-      setCurrentActions(actions);
-      taskRecord.actionSequence = actions;
-      
-      // Step 2: Simulation
-      onProgress(activeNvidia ? "Running NVIDIA World Model simulation..." : "Running Gemini World Model simulation...", 2);
-      let overallSuccess = true;
-      const simLogs = [];
-      
-      for (const action of actions) {
+    try {
+      while (!overallSuccess && retryCount < MAX_RETRIES) {
         if (isAborted) throw new Error("PROCESS_KILLED");
+
+        // Step 1: Decomposition
+        onProgress(activeNvidia ? `Analyzing goal (Attempt ${retryCount + 1})...` : `Analyzing goal (Attempt ${retryCount + 1})...`, 1);
+        taskRecord.status = 'simulating';
         
-        onProgress(`Simulating: ${action.description}...`, 2);
-        const res = activeNvidia 
-          ? await simulateActionNvidia(action, envState)
-          : await geminiSimulate(action, envState);
+        const envDescription = `${envState}\nDetected Objects Positions: ${JSON.stringify(detectedObjects)}`;
+        const actions = activeNvidia 
+          ? await decomposeTaskNvidia(command, envDescription, correctionContext) 
+          : await geminiDecompose(command, envDescription, correctionContext);
           
         if (isAborted) throw new Error("PROCESS_KILLED");
 
-        simLogs.push(res);
+        setCurrentActions(actions);
+        taskRecord.actionSequence = actions;
         
-        if (onActionSimulated) {
-          onActionSimulated(action, res);
+        // Step 2: Simulation
+        onProgress("Validating action sequence in World Model...", 2);
+        let currentIterSuccess = true;
+        const simLogs = [];
+        let iterFeedback = "";
+        let rollingEnvState = envDescription; // Use the same description format
+        
+        for (const action of actions) {
+          if (isAborted) throw new Error("PROCESS_KILLED");
+          
+          onProgress(`Simulating: ${action.description}...`, 2);
+          const res = activeNvidia 
+            ? await simulateActionNvidia(action, rollingEnvState)
+            : await geminiSimulate(action, rollingEnvState);
+            
+          if (isAborted) throw new Error("PROCESS_KILLED");
+
+          simLogs.push(res);
+          
+          if (onActionSimulated) {
+            onActionSimulated(action, res);
+          }
+          
+          await new Promise(r => setTimeout(r, 800)); // Visual delay for simulation steps
+          
+          if (!res.success) {
+            currentIterSuccess = false;
+            iterFeedback = `Action "${action.description}" failed logic check. Reason: ${res.feedback}. Previous state was ${res.resultState}.`;
+            onProgress(`DEVIATION DETECTED: ${res.feedback}. Self-correcting...`, 2);
+            break;
+          } else {
+            // Update the rolling state for the next action's simulation
+            rollingEnvState = res.resultState;
+          }
         }
         
-        await new Promise(r => setTimeout(r, 1000)); // Visual delay for simulation steps
-        
-        if (!res.success) {
-          overallSuccess = false;
-          onProgress(`Simulation FAILED for: ${action.description}. Retrying with adjustment...`, 2);
-          break;
+        if (currentIterSuccess) {
+          overallSuccess = true;
+          setSimulationResult({ success: true, logs: simLogs });
+          taskRecord.simulationLogs = simLogs;
+        } else {
+          retryCount++;
+          correctionContext = iterFeedback;
+          if (retryCount >= MAX_RETRIES) {
+             setSimulationResult({ success: false, logs: simLogs });
+             taskRecord.simulationLogs = simLogs;
+          }
         }
       }
-      
+
       if (isAborted) throw new Error("PROCESS_KILLED");
 
-      setSimulationResult({ success: overallSuccess, logs: simLogs });
-      taskRecord.simulationLogs = simLogs;
-      
       if (overallSuccess) {
         // Step 3: Execution
         taskRecord.status = 'executing';
-        onProgress("Virtual validation successful. Transferring to Robot Interface...", 3);
-        await new Promise(r => setTimeout(r, 2000)); // Simulate hardware latency
+        onProgress("World Model validation SUCCESS. Broadcasting to hardware...", 3);
+        await new Promise(r => setTimeout(r, 1500)); 
         
         if (isAborted) throw new Error("PROCESS_KILLED");
 
@@ -102,13 +128,13 @@ export function useAgent() {
         taskRecord.result = 'Success';
         onProgress("Execution complete.", 0);
         await logTask(taskRecord);
-        return { success: true, actions };
+        return { success: true, actions: taskRecord.actionSequence };
       } else {
         taskRecord.status = 'failed';
-        taskRecord.result = 'Simulation Failure';
-        onProgress("Task simulation failed. Manual intervention may be required.", 0);
+        taskRecord.result = 'Refinement Limit Exceeded';
+        onProgress("Task could not be solved after multiple iterations.", 0);
         await logTask(taskRecord);
-        return { success: false, error: "Simulation failed" };
+        return { success: false, error: "Refinement failed" };
       }
       
     } catch (error: any) {

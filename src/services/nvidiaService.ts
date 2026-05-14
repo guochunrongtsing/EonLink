@@ -46,30 +46,44 @@ async function callNvidia(messages: any[]) {
   }
 }
 
-export async function decomposeTaskNvidia(prompt: string, environmentState: string): Promise<Action[]> {
+export async function decomposeTaskNvidia(prompt: string, environmentState: string, correctionContext?: string): Promise<Action[]> {
   const systemPrompt = `
-    You are the Agent Core of an Embodied Intelligence System.
-    Given a user instruction and the current environment state, decompose the task into a sequence of atomic actions.
+    You are the Brain of EonLink. Decompose user goals into atomic actions.
     
-    Available Skills:
+    ENVIRONMENT STATE:
+    ${environmentState}
+    
+    AVAILABLE SKILLS:
     - navigate_to(x: number, y: number, z: number)
     - pick_up(object_id: string)
     - place_at(x: number, y: number, z: number)
     - open(object_id: string)
     - close(object_id: string)
     
-    Environment State: ${environmentState}
+    ${correctionContext ? `\nCRITICAL: PREVIOUS ATTEMPT FAILED. FEEDBACK: ${correctionContext}` : ""}
     
-    CRITICAL: If the user asks to move to a detected object, use its EXACT coordinates provided in the "Detected Objects Positions" list.
+    TACTICAL SOP:
+    1. PROXIMITY MANDATE: You MUST perform 'navigate_to' the object's (x,z) before any manipulation.
+    2. STATE AWARENESS: If the robot is already carrying the target object, skip navigate-to-object and pick_up. Go directly to destination.
+    3. BRING/MOVE TEMPLATE: [Navigate to Obj] -> [Pick Up] -> [Navigate to Target] -> [Place].
+    4. TARGETS: Use the exact (x,y,z) coordinates provided in the environment state.
     
-    Output ONLY a JSON array of actions with this schema:
+    EXAMPLE:
+    Goal: "Bring me the cup"
+    Output: [
+      {"skill": "navigate_to", "params": {"x": 2.0, "y": 0, "z": 1.0}, "description": "Navigating to cup"},
+      {"skill": "pick_up", "params": {"object_id": "cup"}, "description": "Grasping cup"},
+      {"skill": "navigate_to", "params": {"x": 0, "y": 0, "z": 0}, "description": "Returning to home"},
+      {"skill": "place_at", "params": {"x": 0, "y": 0.5, "z": 0.1}, "description": "Handing over cup"}
+    ]
+    
+    Output ONLY a JSON array of actions:
     [{ "skill": string, "params": { "x"?: number, "y"?: number, "z"?: number, "object_id"?: string }, "description": string }]
-    Example: { "skill": "navigate_to", "params": { "x": 1.2, "y": 0, "z": 3.4 }, "description": "Moving to sensed bed" }
   `;
 
   try {
     const content = await callNvidia([
-      { role: "system", content: "You are a helpful robotic assistant." },
+      { role: "system", content: "You are a highly efficient task decomposition engine." },
       { role: "user", content: systemPrompt + "\n\nUser Instruction: " + prompt }
     ]);
     

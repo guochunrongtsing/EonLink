@@ -8,26 +8,43 @@ export interface Action {
   description: string;
 }
 
-export async function decomposeTask(prompt: string, environmentState: string): Promise<Action[]> {
+export async function decomposeTask(prompt: string, environmentState: string, correctionContext?: string): Promise<Action[]> {
   const systemPrompt = `
-    You are the Agent Core of an Embodied Intelligence System.
-    Given a user instruction and the current environment state, decompose the task into a sequence of atomic actions.
+    You are the Brain of EonLink, an embodied intelligence system.
+    Given a high-level user goal and the current environment state, decompose the task into a logical sequence of atomic actions.
     
-    Available Skills:
+    ENVIRONMENT STATE:
+    ${environmentState}
+    
+    AVAILABLE SKILLS:
     - navigate_to(x: number, y: number, z: number)
     - pick_up(object_id: string)
     - place_at(x: number, y: number, z: number)
     - open(object_id: string)
     - close(object_id: string)
     
-    Environment State: ${environmentState}
+    ${correctionContext ? `\nCRITICAL: PREVIOUS ATTEMPT FAILED. FEEDBACK: ${correctionContext}` : ""}
     
-    CRITICAL: If the user asks to move to a detected object, use its EXACT coordinates provided in the "Detected Objects Positions" list.
-    Coordinate reference: X (horizontal), Y (vertical), Z (depth).
+    STANDARD OPERATING PROCEDURE (SOP):
+    1. PROXIMITY CHECK: You cannot interact (pick/place/open/close) with an object if the robot is not currently at that object's coordinates.
+    2. CARRYING STATE: If 'Robot is currently carrying [object]', do NOT use 'pick_up' for that object. You can only 'place_at'.
+    3. FIRST STEP: If the goal involves an object at a distance and you aren't carrying it, the FIRST action MUST be 'navigate_to' that object.
+    4. BRING/MOVE GOALS:
+       - If NOT carrying: [Navigate to Obj] -> [Pick Up] -> [Navigate to Destination] -> [Place].
+       - If ALREADY carrying: [Navigate to Destination] -> [Place].
+    5. USER POSITION: If the user says "bring to me", the destination is [0, 0, 0].
     
-    Output a JSON array of actions with this schema:
+    EXAMPLE:
+    Goal: "Bring me the cup"
+    Output: [
+      {"skill": "navigate_to", "params": {"x": 2.0, "y": 0, "z": 1.0}, "description": "Moving to the cup position"},
+      {"skill": "pick_up", "params": {"object_id": "red_cup"}, "description": "Picking up the cup"},
+      {"skill": "navigate_to", "params": {"x": 0, "y": 0, "z": 0}, "description": "Bringing cup back to user"},
+      {"skill": "place_at", "params": {"x": 0, "y": 0.5, "z": 0.2}, "description": "Placing cup near user"}
+    ]
+    
+    Output ONLY a JSON array of actions:
     [{ "skill": string, "params": { "x"?: number, "y"?: number, "z"?: number, "object_id"?: string }, "description": string }]
-    Example: { "skill": "navigate_to", "params": { "x": 1.2, "y": 0, "z": 3.4 }, "description": "Moving to sensed bed" }
   `;
 
   try {

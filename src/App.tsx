@@ -95,35 +95,87 @@ const DetectedObjectMesh = ({ object }: { object: DetectedObject }) => {
   );
 };
 
-const RobotModel = ({ isSimulating = false }: any) => {
+const RobotModel = ({ isSimulating = false, isCarrying = false }: any) => {
   return (
     <group>
-      {/* Basic Robot Representation */}
-      <mesh position={[0, 0.5, 0]} castShadow>
-        <boxGeometry args={[0.5, 1, 0.3]} />
+      {/* Legs */}
+      <mesh position={[-0.15, 0.2, 0]} castShadow>
+        <boxGeometry args={[0.12, 0.4, 0.12]} />
+        <meshStandardMaterial color="#222" />
+      </mesh>
+      <mesh position={[0.15, 0.2, 0]} castShadow>
+        <boxGeometry args={[0.12, 0.4, 0.12]} />
+        <meshStandardMaterial color="#222" />
+      </mesh>
+
+      {/* Torso */}
+      <mesh position={[0, 0.8, 0]} castShadow>
+        <boxGeometry args={[0.45, 0.8, 0.25]} />
         <meshStandardMaterial color={isSimulating ? "#4466ff" : "#333"} roughness={0.1} metalness={0.8} />
       </mesh>
-      <mesh position={[0, 1.2, 0]} castShadow>
-        <sphereGeometry args={[0.2]} />
+
+      {/* Head */}
+      <mesh position={[0, 1.35, 0]} castShadow>
+        <sphereGeometry args={[0.18]} />
         <meshStandardMaterial color="#555" emissive={isSimulating ? "#00ffff" : "#0077ff"} emissiveIntensity={0.5} />
+        {/* Visor */}
+        <mesh position={[0, 0.05, 0.12]}>
+          <boxGeometry args={[0.2, 0.05, 0.02]} />
+          <meshStandardMaterial color="#111" emissive={isSimulating ? "#00ffff" : "#0077ff"} />
+        </mesh>
       </mesh>
-      {/* Arms */}
-      <group rotation={[isSimulating ? 0.5 : 0, 0, 0]}>
-        <mesh position={[0.35, 0.7, 0]} castShadow>
-          <boxGeometry args={[0.1, 0.6, 0.1]} />
+
+      {/* 3-Segmented Arm (Right) */}
+      <group position={[0.25, 1.1, 0]} rotation={[isCarrying ? -0.8 : 0.2, 0, 0]}>
+        {/* Upper Arm */}
+        <mesh position={[0.1, -0.15, 0]} castShadow>
+          <capsuleGeometry args={[0.05, 0.3, 4, 8]} />
           <meshStandardMaterial color="#444" />
         </mesh>
+        
+        {/* Forearm */}
+        <group position={[0.1, -0.3, 0]} rotation={[isCarrying ? -0.5 : 0.5, 0, 0]}>
+          <mesh position={[0, -0.15, 0]} castShadow>
+            <capsuleGeometry args={[0.04, 0.3, 4, 8]} />
+            <meshStandardMaterial color="#555" />
+          </mesh>
+          
+          {/* Hand/Palm */}
+          <group position={[0, -0.3, 0]} rotation={[0, 0, 0]}>
+            <mesh castShadow>
+              <boxGeometry args={[0.12, 0.1, 0.1]} />
+              <meshStandardMaterial color="#222" />
+            </mesh>
+            {/* Fingers simplified */}
+            <mesh position={[-0.03, -0.06, 0]}>
+              <boxGeometry args={[0.02, 0.05, 0.02]} />
+              <meshStandardMaterial color="#111" />
+            </mesh>
+            <mesh position={[0.03, -0.06, 0]}>
+              <boxGeometry args={[0.02, 0.05, 0.02]} />
+              <meshStandardMaterial color="#111" />
+            </mesh>
+          </group>
+        </group>
       </group>
-      <group rotation={[isSimulating ? -0.5 : 0, 0, 0]}>
-        <mesh position={[-0.35, 0.7, 0]} castShadow>
-          <boxGeometry args={[0.1, 0.6, 0.1]} />
+
+      {/* Left Arm (Symmetric) */}
+      <group position={[-0.25, 1.1, 0]} rotation={[0.2, 0, 0]}>
+        <mesh position={[-0.1, -0.15, 0]} castShadow>
+          <capsuleGeometry args={[0.05, 0.3, 4, 8]} />
           <meshStandardMaterial color="#444" />
         </mesh>
+        <group position={[-0.1, -0.3, 0]} rotation={[0.5, 0, 0]}>
+          <mesh position={[0, -0.15, 0]} castShadow>
+            <capsuleGeometry args={[0.04, 0.3, 4, 8]} />
+            <meshStandardMaterial color="#555" />
+          </mesh>
+        </group>
       </group>
 
       {/* Connection lines if simulating */}
       {isSimulating && (
-        <mesh position={[0, 2, 0]}>
+        <mesh position={[0, 2.5, 0]}>
           <cylinderGeometry args={[0.01, 0.01, 2]} />
           <meshBasicMaterial color="#00ffff" transparent opacity={0.2} />
         </mesh>
@@ -262,7 +314,7 @@ export default function App() {
     
     const result = await processCommand(
       currentInput, 
-      `Robot at (${robotPos.join(',')}). Physical markers: Red cup at (${cupPos.join(',')}), Simulation table at (2,0,1, and -2,0,-2).`, 
+      `Robot is at (${robotPos.map(n => n.toFixed(2)).join(',')}). ${isCarrying ? "Robot is currently carrying the Red cup." : "Robot is not carrying anything."} Known Physical Objects: [Red cup: (${cupPos.map(n => n.toFixed(2)).join(',')}), Table A: (2,0,1), Table B: (-2,0,-2)].`, 
       detectedObjects,
       (msg, step) => {
         addLog(msg);
@@ -274,8 +326,25 @@ export default function App() {
         const skill = action.skill;
 
         if (skill === "navigate_to" && params.x !== undefined) {
-          setRobotPos([params.x, params.y || 0, params.z]);
-          addLog(`HARDWARE: Moving to vector (${params.x}, ${params.y}, ${params.z})`);
+          // Rule of Physics: Don't overlap with target, stay at approx 0.6 units distance
+          const targetX = params.x;
+          const targetZ = params.z;
+          
+          const dx = targetX - robotPos[0];
+          const dz = targetZ - robotPos[2];
+          const dist = Math.sqrt(dx * dx + dz * dz);
+          
+          let finalX = targetX;
+          let finalZ = targetZ;
+          
+          if (dist > 0.6) {
+            const ratio = (dist - 0.6) / dist;
+            finalX = robotPos[0] + dx * ratio;
+            finalZ = robotPos[2] + dz * ratio;
+          }
+
+          setRobotPos([finalX, params.y || 0, finalZ]);
+          addLog(`HARDWARE: Moving to standing position (${finalX.toFixed(2)}, ${params.y || 0}, ${finalZ.toFixed(2)}) near target`);
         } else if (skill === "navigate_to") {
           // Fallback legacy heuristic
           const desc = action.description.toLowerCase();
@@ -506,7 +575,7 @@ export default function App() {
                 />
                 
                 <SmoothGroup position={robotPos}>
-                  <RobotModel isSimulating={activeStep === 2} />
+                  <RobotModel isSimulating={activeStep === 2} isCarrying={isCarrying} />
                 </SmoothGroup>
 
                 {/* Detected Objects Mapping */}
