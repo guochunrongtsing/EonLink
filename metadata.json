@@ -1,0 +1,13 @@
+{
+  "name": "EonLink: Embodied Intelligence System",
+  "description": "A virtual-real fusion system for embodied AI, featuring world model simulation, multi-layer agent reasoning, and self-evolving skill libraries.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "AI Reasoning",
+    "3D Simulation",
+    "Real-time Robotics Interface"
+  ]
+}

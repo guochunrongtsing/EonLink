@@ -1,0 +1,39 @@
+{
+  "entities": {
+    "Skill": {
+      "title": "Skill",
+      "description": "An atomic or complex robotic skill.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "paramsSchema": { "type": "object" },
+        "code": { "type": "string" }
+      },
+      "required": ["name", "description"]
+    },
+    "TaskRecord": {
+      "title": "Task Record",
+      "description": "A record of a task execution including virtual validation and real execution.",
+      "type": "object",
+      "properties": {
+        "instruction": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "simulating", "executing", "completed", "failed"] },
+        "actionSequence": { "type": "array" },
+        "simulationLogs": { "type": "array" },
+        "result": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "firestore": {
+    "skills": {
+      "schema": "Skill",
+      "description": "Collection of available robot skills"
+    },
+    "tasks": {
+      "schema": "TaskRecord",
+      "description": "History of tasks performed"
+    }
+  }
+}

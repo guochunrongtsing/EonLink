@@ -1,0 +1,78 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+    
+    function incoming() {
+      return request.resource.data;
+    }
+    
+    function existing() {
+      return resource.data;
+    }
+    
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // --- Validation Helpers ---
+    
+    function isValidSkill(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() <= 100
+        && data.description is string && data.description.size() <= 500
+        && (!('code' in data) || (data.code is string && data.code.size() <= 10000));
+    }
+
+    function isValidTask(data) {
+      return data.instruction is string && data.instruction.size() <= 1000
+        && data.status in ['pending', 'simulating', 'executing', 'completed', 'failed']
+        && data.ownerId == request.auth.uid
+        && data.timestamp is string; // Using string for now as per current service implementation
+    }
+
+    // --- Collections ---
+
+    match /skills/{skillId} {
+      allow read: if isSignedIn();
+      allow create: if isEmailVerified() && isValidSkill(incoming()) && isValidId(skillId);
+      // Skills are mostly immutable for now in this version
+      allow update: if false; 
+    }
+
+    match /tasks/{taskId} {
+      // 8. Secure List Queries
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow get: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      
+      allow create: if isEmailVerified() && isValidTask(incoming()) && isValidId(taskId);
+      
+      allow update: if isSignedIn() 
+        && existing().ownerId == request.auth.uid
+        && existing().status in ['pending', 'simulating', 'executing']
+        && isValidTask(incoming())
+        && (
+          // Action: Status Update
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'simulationLogs', 'result', 'actionSequence', 'timestamp'])
+        );
+      
+      allow delete: if isSignedIn() && existing().ownerId == request.auth.uid;
+    }
+
+    match /test/connection {
+      allow read: if true;
+    }
+  }
+}
