@@ -7,7 +7,7 @@ EonLink is a next-generation multi-layer embodied intelligence system that integ
 The system follows a reactive four-layer architecture:
 
 *   **User Interaction Layer**: Parses natural language intent into high-level goals.
-*   **Agent Core (The Brain)**: Uses Gemini 2.0 or Llama-3 (NVIDIA NIM) for task decomposition and iterative refinement.
+*   **Agent Core (The Brain)**: Uses a tiered priority chain (NVIDIA NIM -> OpenRouter -> Gemini 2.0) for task decomposition and iterative refinement, ensuring high availability and reasoning performance.
 *   **World Model (Dynamic Simulator)**: A 3D environment (React Three Fiber) that performs both static pre-checks and dynamic monitoring during execution.
 *   **Dynamic Hardware Bridge (ROS 2 / 10Hz Loop)**: A high-frequency control loop that translates plan segments into real-time motor commands, adjusting for environment changes at 10 FPS.
 

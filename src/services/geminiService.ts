@@ -8,6 +8,12 @@ export interface Action {
   description: string;
 }
 
+export interface ActionResult {
+  success: boolean;
+  resultState: string;
+  feedback: string;
+}
+
 export async function decomposeTask(prompt: string, environmentState: string, correctionContext?: string): Promise<Action[]> {
   const systemPrompt = `
     You are the Brain of EonLink, an embodied intelligence system.
@@ -66,7 +72,7 @@ export async function decomposeTask(prompt: string, environmentState: string, co
   }
 }
 
-export async function simulateAction(action: Action, environmentState: string): Promise<{ success: boolean; resultState: string; feedback: string }> {
+export async function simulateAction(action: Action, environmentState: string): Promise<ActionResult> {
   const worldModelPrompt = `
     You are the World Model Simulator. 
     Predict the outcome of an action in the environment.

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { decomposeTask as geminiDecompose, simulateAction as geminiSimulate, Action } from '../services/geminiService';
+import { decomposeTask as geminiDecompose, simulateAction as geminiSimulate, Action, ActionResult } from '../services/geminiService';
 import { decomposeTaskNvidia, simulateActionNvidia, checkNvidiaAvailability } from '../services/nvidiaService';
+import { decomposeTaskOpenRouter, simulateActionOpenRouter } from '../services/openrouterService';
 import { logTask } from '../services/firebaseService';
 
 export function useAgent() {
@@ -13,6 +14,16 @@ export function useAgent() {
   useEffect(() => {
     checkNvidiaAvailability().then(setHasNvidia);
   }, []);
+
+  const getActiveProvider = async () => {
+    const nvidiaOk = await checkNvidiaAvailability();
+    if (nvidiaOk) return "NVIDIA";
+    
+    const openRouterKey = process.env.OPENROUTER_API_KEY;
+    if (openRouterKey && openRouterKey !== "MY_OPENROUTER_API_KEY") return "OPENROUTER";
+    
+    return "GEMINI";
+  };
   
   const stopProcess = () => {
     setIsAborted(true);
@@ -28,9 +39,8 @@ export function useAgent() {
     setIsProcessing(true);
     setIsAborted(false);
     
-    // Check again in case it changed
-    const activeNvidia = await checkNvidiaAvailability();
-    setHasNvidia(activeNvidia);
+    const provider = await getActiveProvider();
+    setHasNvidia(provider === "NVIDIA");
 
     let taskRecord: any = {
       instruction: command,
@@ -38,7 +48,8 @@ export function useAgent() {
       actionSequence: [],
       simulationLogs: [],
       result: '',
-      detectedContext: detectedObjects
+      detectedContext: detectedObjects,
+      provider: provider
     };
 
     let overallSuccess = false;
@@ -51,13 +62,24 @@ export function useAgent() {
         if (isAborted) throw new Error("PROCESS_KILLED");
 
         // Step 1: Decomposition
-        onProgress(activeNvidia ? `Analyzing goal (Attempt ${retryCount + 1})...` : `Analyzing goal (Attempt ${retryCount + 1})...`, 1);
+        onProgress(`[${provider}] Analyzing goal (Attempt ${retryCount + 1})...`, 1);
         taskRecord.status = 'simulating';
         
         const envDescription = `${envState}\nDetected Objects Positions: ${JSON.stringify(detectedObjects)}`;
-        const actions = activeNvidia 
-          ? await decomposeTaskNvidia(command, envDescription, correctionContext) 
-          : await geminiDecompose(command, envDescription, correctionContext);
+        
+        let actions: Action[];
+        try {
+          if (provider === "NVIDIA") {
+            actions = await decomposeTaskNvidia(command, envDescription, correctionContext);
+          } else if (provider === "OPENROUTER") {
+            actions = await decomposeTaskOpenRouter(command, envDescription, correctionContext);
+          } else {
+            actions = await geminiDecompose(command, envDescription, correctionContext);
+          }
+        } catch (e) {
+          console.error(`Decomposition failed on ${provider}, falling back to Gemini if possible`, e);
+          actions = await geminiDecompose(command, envDescription, correctionContext);
+        }
           
         if (isAborted) throw new Error("PROCESS_KILLED");
 
@@ -65,7 +87,7 @@ export function useAgent() {
         taskRecord.actionSequence = actions;
         
         // Step 2: Simulation (Virtual Verification)
-        onProgress("World Model: Performing static integrity check...", 2);
+        onProgress(`[${provider}] World Model: Static check...`, 2);
         let currentIterSuccess = true;
         const simLogs = [];
         let iterFeedback = "";
@@ -75,9 +97,20 @@ export function useAgent() {
           if (isAborted) throw new Error("PROCESS_KILLED");
           
           onProgress(`Verifying: ${action.description}...`, 2);
-          const res = activeNvidia 
-            ? await simulateActionNvidia(action, rollingEnvState)
-            : await geminiSimulate(action, rollingEnvState);
+          
+          let res: ActionResult;
+          try {
+            if (provider === "NVIDIA") {
+              res = await simulateActionNvidia(action, rollingEnvState);
+            } else if (provider === "OPENROUTER") {
+              res = await simulateActionOpenRouter(action, rollingEnvState);
+            } else {
+              res = await geminiSimulate(action, rollingEnvState);
+            }
+          } catch (e) {
+            console.error(`Simulation failed on ${provider}, using Gemini`, e);
+            res = await geminiSimulate(action, rollingEnvState);
+          }
             
           if (isAborted) throw new Error("PROCESS_KILLED");
           simLogs.push(res);
