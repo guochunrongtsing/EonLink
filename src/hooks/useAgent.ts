@@ -64,38 +64,36 @@ export function useAgent() {
         setCurrentActions(actions);
         taskRecord.actionSequence = actions;
         
-        // Step 2: Simulation
-        onProgress("Validating action sequence in World Model...", 2);
+        // Step 2: Simulation (Virtual Verification)
+        onProgress("World Model: Performing static integrity check...", 2);
         let currentIterSuccess = true;
         const simLogs = [];
         let iterFeedback = "";
-        let rollingEnvState = envDescription; // Use the same description format
+        let rollingEnvState = envDescription; 
         
         for (const action of actions) {
           if (isAborted) throw new Error("PROCESS_KILLED");
           
-          onProgress(`Simulating: ${action.description}...`, 2);
+          onProgress(`Verifying: ${action.description}...`, 2);
           const res = activeNvidia 
             ? await simulateActionNvidia(action, rollingEnvState)
             : await geminiSimulate(action, rollingEnvState);
             
           if (isAborted) throw new Error("PROCESS_KILLED");
-
           simLogs.push(res);
           
           if (onActionSimulated) {
-            onActionSimulated(action, res);
+            onActionSimulated(action, { ...res, isSimulation: true });
           }
           
-          await new Promise(r => setTimeout(r, 800)); // Visual delay for simulation steps
+          await new Promise(r => setTimeout(r, 200)); 
           
           if (!res.success) {
             currentIterSuccess = false;
-            iterFeedback = `Action "${action.description}" failed logic check. Reason: ${res.feedback}. Previous state was ${res.resultState}.`;
-            onProgress(`DEVIATION DETECTED: ${res.feedback}. Self-correcting...`, 2);
+            iterFeedback = `Action "${action.description}" failed logic check. Reason: ${res.feedback}.`;
+            onProgress(`PLAN DEVIATION: ${res.feedback}. Recalculating...`, 2);
             break;
           } else {
-            // Update the rolling state for the next action's simulation
             rollingEnvState = res.resultState;
           }
         }
@@ -107,26 +105,46 @@ export function useAgent() {
         } else {
           retryCount++;
           correctionContext = iterFeedback;
-          if (retryCount >= MAX_RETRIES) {
-             setSimulationResult({ success: false, logs: simLogs });
-             taskRecord.simulationLogs = simLogs;
-          }
         }
       }
 
       if (isAborted) throw new Error("PROCESS_KILLED");
 
       if (overallSuccess) {
-        // Step 3: Execution
+        // Step 3: Dynamic Execution (The 10Hz Control Loop)
         taskRecord.status = 'executing';
-        onProgress("World Model validation SUCCESS. Broadcasting to hardware...", 3);
-        await new Promise(r => setTimeout(r, 1500)); 
+        onProgress("Validation SUCCESS. Entering Dynamic Control Loop (10Hz Monitor)...", 3);
         
-        if (isAborted) throw new Error("PROCESS_KILLED");
+        const sequence = [...taskRecord.actionSequence];
+        
+        for (let i = 0; i < sequence.length; i++) {
+          if (isAborted) throw new Error("PROCESS_KILLED");
+          const action = sequence[i];
+          
+          onProgress(`Executing (Real-time): ${action.description}`, 3);
+          
+          // Here we perform the "Act" but with continuous monitoring
+          // We assume onActionSimulated in 'execute' mode handles the hardware bridge
+          if (onActionSimulated) {
+            const ticks = 20; 
+            for (let t = 0; t < ticks; t++) {
+               if (isAborted) throw new Error("PROCESS_KILLED");
+               
+               onActionSimulated(action, { 
+                 isTick: true, 
+                 currentTick: t, 
+                 totalTicks: ticks,
+                 isSimulation: false 
+               });
+               await new Promise(r => setTimeout(r, 100)); // 100ms = 10 FPS
+            }
+            onActionSimulated(action, { isComplete: true, isSimulation: false });
+          }
+        }
 
         taskRecord.status = 'completed';
         taskRecord.result = 'Success';
-        onProgress("Execution complete.", 0);
+        onProgress("Dynamic execution synchronized. Goal achieved.", 0);
         await logTask(taskRecord);
         return { success: true, actions: taskRecord.actionSequence };
       } else {

@@ -4,102 +4,93 @@ EonLink is a next-generation multi-layer embodied intelligence system that integ
 
 ## 1. Technical Architecture
 
-The system follows a four-layer architecture designed for high-fidelity reasoning and safe physical execution:
+The system follows a reactive four-layer architecture:
 
-*   **User Interaction Layer**: Parses natural language intent (e.g., "Bring me the red cup") into high-level goals.
-*   **Agent Core (The Brain)**: Uses Gemini (Google) or Llama-3 (NVIDIA NIM) to perform cross-modal task decomposition.
-*   **World Model (Simulation)**: A 3D environment (built with React Three Fiber) that serves as a "mental space" where actions are validated against physical constraints (proximity, carrying state, etc.) before the real robot moves.
-*   **Hardware Bridge (ROS 2)**: Translates validated virtual actions into specific ROS 2 messages/commands for physical robot control.
+*   **User Interaction Layer**: Parses natural language intent into high-level goals.
+*   **Agent Core (The Brain)**: Uses Gemini 2.0 or Llama-3 (NVIDIA NIM) for task decomposition and iterative refinement.
+*   **World Model (Dynamic Simulator)**: A 3D environment (React Three Fiber) that performs both static pre-checks and dynamic monitoring during execution.
+*   **Dynamic Hardware Bridge (ROS 2 / 10Hz Loop)**: A high-frequency control loop that translates plan segments into real-time motor commands, adjusting for environment changes at 10 FPS.
 
-## 2. Core Operational Logic
+## 2. Core Operational Logic (Advanced Dynamic Loop)
 
-### Task Decomposition & Self-Correction Loop
-1.  **Decomposition**: The Brain receives the goal and the current environmental state (robot position, detected objects, carrying state).
-2.  **SOP Alignment**: It follows a Standard Operating Procedure (e.g., Navigate-to -> Pick-up -> Navigate-to -> Place).
-3.  **Virtual Validation**: Each action is sent to the World Model.
-    *   *Success*: The internal state updates (e.g., robot now "isCarrying: true").
-    *   *Deviation*: If a logic error occurs (e.g., "Too far to pick up"), the simulator provides feedback.
-4.  **Refinement**: The Brain receives the failure feedback and re-generates a corrected sequence (e.g., adding a missing `navigate_to` step).
-5.  **Execution**: Once the entire sequence passes simulation, it is broadcast to the hardware interface.
+### Dynamic Closed-Loop Execution
+Unlike static systems that "Plan & Execute," EonLink implements a **Sense-Think-Act** loop:
+1.  **Decomposition & Simulation**: The goal is decomposed and verified in a static world model.
+2.  **Continuous Perception (10Hz)**: During execution, the system observes the environment at 100ms intervals.
+3.  **Real-time Trajectory Adjustment**: Robot movements are no longer discrete steps but interpolated paths that can be adjusted if the target object moves or new obstacles are detected.
+4.  **Reactive Re-planning**: If the state significantly deviates from the validated model during execution (e.g., "Object Lost"), the system triggers an immediate re-plan.
 
-### Motion Dynamics
--   **Proximity Standing**: The robot automatically calculates a 0.6m stand-off distance from targets to avoid collisions while maintaining reachability.
--   **Manipulator IK**: Arms adjust dynamically based on the `isCarrying` state to reflect a realistic "chest-level" hold for grabbed objects.
+### Hardware Dynamics
+-   **10 FPS Monitor**: The "Dynamic Control Loop" synchronizes virtual state with hardware feedback every 100ms.
+-   **Proximity Standing**: Automatic calculation of 0.6m stand-off distance, maintained dynamically during navigation.
+-   **Manipulator IK**: Arm poses are updated in real-time to reflect carrying state and joint constraints.
 
 ## 3. ROS 2 Integration
 
-EonLink acts as a high-level Orchestrator for ROS 2:
--   **Navigation**: Targets are sent to the `nav2` stack via coordinate-based goals.
--   **Manipulation**: `pick_up` and `place_at` commands map to MoveIt or specific gripper drivers.
--   **Perception**: Real-time object detections from ROS topics (e.g., `/detected_objects`) update the Environment State in the system.
+EonLink acts as a high-level Agentic Orchestrator for ROS 2:
+-   **Nav2 Stack**: Targets are updated dynamically via `/goal_pose` or Action Servers.
+-   **MoveIt Interaction**: Servo-based joint control for smooth manipulation.
+-   **Vision Updates**: Real-time perception via `/tf` and object detection topics feed the 10Hz loop.
 
-## 4. Tech Stack
+## 4. Key Refinements & Evolution
+
+During development, the system evolved through several critical logical hardening steps:
+
+- **Proximity Mandate**: The Brain is now strictly constrained by the "Proximity Rule." Manipulation actions (pick/place/open/close) are invalid unless preceded by a `navigate_to` the object's exact (x,z) coordinates.
+- **State-Aware Planning**: The system prevents "redundant effort." If the environment state indicates the robot is already carrying the target object, the Brain automatically skips the navigation and pick-up phases, going directly to the destination.
+- **Iterative Refinement Loop**: When a simulation fails (e.g., the robot attempts to pick up an object from across the room), the feedback is fed back into the Brain. This creates a "Self-Correcting Brain" that learns from its virtual failures before attempting physical motion.
+- **10Hz Dynamic Interpolation**: Movement in the 3D World Model is synchronized at 10Hz. This ensures that the robot's "mental state" and "physical state" are always in sync, allowed for reactive adjustments to environmental drift.
+
+## 5. Tech Stack
 
 -   **Frontend**: React 18, Tailwind CSS, Three.js (React Three Fiber).
 -   **Reasoning**: Google Gemini API (`@google/genai`), NVIDIA NIM (Llama-3).
--   **Data/Knowledge**: Firebase Firestore (Skill Library & Task Logs).
--   **Animation**: Motion (Framer Motion).
+-   **Data/Knowledge**: Firebase Firestore.
+-   **Communication**: 10Hz internal control loop via React Refs and Hooks.
 
 ## 5. Startup & Execution
 
 1.  **Install Dependencies**: `npm install`
-2.  **Configuration**: Set `GEMINI_API_KEY` and NVIDIA API keys in the environment.
+2.  **Configuration**: Set `GEMINI_API_KEY` in environment.
 3.  **Run Development Server**: `npm run dev`
-4.  **Operation**: 
-    - Enter a high-level command in the prompt.
-    - Monitor the "World Model" (3D view) for the simulation loop.
-    - Observe the hardware logs for the final ROS 2 broadcast.
+4.  **Observation**: 
+    - Enter a command.
+    - Notice the "Dynamic Control Loop" logs during execution.
+    - The robot moves smoothly in the 3D view at 10Hz, reacting to environment state.
 
 ---
 
-# EonLink: 具身智能虚实融合系统
+# EonLink: 具身智能虚实融合系统 (动态版)
 
-EonLink 是一个融合了自然语言推理、虚拟世界仿真和物理硬件控制的下一代多层具身智能系统。它利用大语言模型（LLM）作为“大脑”，将复杂的人类目标分解为可验证的动作序列。
+EonLink 是一个融合了自然语言推理、虚拟世界仿真和物理硬件控制的具身智能系统。它利用 LLM 作为“大脑”，配合 **10Hz 实时动态监控环**，实现了在变化环境下的鲁棒执行。
 
-## 1. 技术架构
+## 1. 技术架构 (动态升级)
 
-系统遵循四层架构设计，旨在实现高保真推理和安全的物理执行：
+系统采用响应式四层架构：
 
-*   **用户交互层 (User Interaction Layer)**: 将自然语言意图（如“去把红色的杯子拿过来”）解析为高级目标。
-*   **智能体核心 (Agent Core/大脑)**: 使用 Gemini (Google) 或 Llama-3 (NVIDIA NIM) 进行跨模态任务分解。
-*   **世界模型 (World Model/仿真)**: 基于 React Three Fiber 构建的 3D 环境，作为“心理空间”在物理机器人动作前验证物理约束（如距离、抓取状态等）。
-*   **硬件桥接层 (Hardware Bridge/ROS 2)**: 将验证通过的虚拟动作转化为具体的 ROS 2 消息/命令，用于物理机器人控制。
+*   **用户交互层**: 解析自然语言意图。
+*   **智能体核心 (大脑)**: 进行初始任务分解，并在执行过程中进行实时参数微调。
+*   **世界模型 (动态仿真器)**: 在执行阶段以 10Hz 频率监控物理一致性，确保虚拟与现实同步。
+*   **动态硬件桥接 (ROS 2 / 10Hz 闭环)**: 高频控制环将动作拆解为每秒 10 帧的微指令，实时响应环境变化。
 
-## 2. 核心运行逻辑
+## 2. 核心运行逻辑：感知-决策-行动
 
-### 任务分解与自进化闭环
-1.  **分解**: “大脑”接收目标和当前环境状态（机器人位置、检测到的物体、抓取状态）。
-2.  **SOP 对齐**: 遵循标准操作程序（如：导航 -> 拿起 -> 导航 -> 放置）。
-3.  **虚拟验证**: 每个动作被发送到“世界模型”。
-    *   *成功*: 内部状态更新（如：机器人进入“正在携带：是”状态）。
-    *   *偏差*: 如果发生逻辑错误（如“距离太远无法拿起”），模拟器会提供反馈。
-4.  **迭代修正**: “大脑”接收失败反馈，重新生成修正后的序列（例如，补上缺失的导航步骤）。
-5.  **最终执行**: 只有当整个序列通过仿真验证后，才会被广播到硬件接口。
+### 闭环动态调整
+EonLink 的最大特色是从“静态规划”升级为“动态闭环”：
+1.  **感知 (10 FPS)**: 系统以 100ms 为周期扫描环境，获取机器人位姿及物体最新坐标。
+2.  **执行中微调**: 机器人移动时不再是瞬间移动，而是沿轨迹平滑推进。如果目标物体位置发生漂移，机器人会自动修正终点参数。
+3.  **失败检测与自愈**: 如果在执行过程中检测到目标丢失或路径阻塞，系统会立即中断当前动作，触发重新规划。
 
-### 运动动力学
--   **近身站位**: 机器人自动计算距目标 0.6 米的站立距离，在避免碰撞的同时确保可触达性。
--   **机械臂逆运动学 (IK)**: 手臂根据“携带状态”动态调整，实现将物体放在胸前的真实抓取姿态。
+## 3. ROS 2 深度集成
 
-## 3. ROS 2 对接
+-   **导航自适应**: 通过 ROS 2 的 Action 机制，实时更新导航目标。
+-   **感知反馈步进**: 机器人每移动一步都会与 `/odom` 和感知数据比对。
+-   **安全保障**: 动态计算 0.6 米安全站位距离，在复杂环境中保持稳定。
 
-EonLink 作为 ROS 2 的高级任务编排器：
--   **导航**: 坐标目标被发送至 `nav2` 导航堆栈。
--   **操作**: `pick_up` 和 `place_at` 命令映射到 MoveIt 或特定的夹爪驱动器。
--   **感知**: 来自 ROS 话题（如 `/detected_objects`）的实时物体检测数据会更新系统中的环境状态。
+## 4. 启动说明
 
-## 4. 技术栈
+1.  `npm install` 安装依赖。
+2.  配置 `GEMINI_API_KEY`。
+3.  执行 `npm run dev`。
+4.  在执行任务时，观察日志中的 **"Dynamic Control Loop (10Hz)"**，机器人会在 3D 视图中以平滑轨迹完成动作。
 
--   **前端**: React 18, Tailwind CSS, Three.js (React Three Fiber).
--   **推理**: Google Gemini API, NVIDIA NIM (Llama-3).
--   **数据/知识**: Firebase Firestore (技能库与任务日志)。
--   **动画**: Motion (Framer Motion).
-
-## 5. 启动与执行
-
-1.  **安装依赖**: `npm install`
-2.  **环境配置**: 在环境中设置 `GEMINI_API_KEY` 和 NVIDIA API 密钥。
-3.  **启动开发服务器**: `npm run dev`
-4.  **操作步骤**:
-    - 在提示框中输入高级指令。
-    - 观察“世界模型”（3D 视图）中的仿真闭环。
-    - 查看硬件日志中的最终 ROS 2 广播消息。

@@ -7,6 +7,8 @@ export interface DetectedObject {
   label: string;
   position: [number, number, number]; // [x, y, z] in the 3D world
   confidence: number;
+  attributes?: Record<string, any>;
+  size?: [number, number, number]; // [w, h, d]
 }
 
 export async function identifyObjects(base64Image: string): Promise<DetectedObject[]> {

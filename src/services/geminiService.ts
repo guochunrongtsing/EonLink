@@ -26,12 +26,14 @@ export async function decomposeTask(prompt: string, environmentState: string, co
     ${correctionContext ? `\nCRITICAL: PREVIOUS ATTEMPT FAILED. FEEDBACK: ${correctionContext}` : ""}
     
     STANDARD OPERATING PROCEDURE (SOP):
-    1. PROXIMITY CHECK: You cannot interact (pick/place/open/close) with an object if the robot is not currently at that object's coordinates.
-    2. CARRYING STATE: If 'Robot is currently carrying [object]', do NOT use 'pick_up' for that object. You can only 'place_at'.
-    3. FIRST STEP: If the goal involves an object at a distance and you aren't carrying it, the FIRST action MUST be 'navigate_to' that object.
-    4. BRING/MOVE GOALS:
-       - If NOT carrying: [Navigate to Obj] -> [Pick Up] -> [Navigate to Destination] -> [Place].
-       - If ALREADY carrying: [Navigate to Destination] -> [Place].
+    1. SAFETY DISTANCE: Never navigate to the exact (x,y,z) of an object. Stay ~0.8m - 1.0m away.
+    2. TABLE FOOTPRINT: If a cup is on a table (e.g., at 2,0,1), navigate to (1.2, 0, 1) or similar. Do not walk into the table.
+    3. CARRYING STATE: If 'Robot is currently carrying [object]', do NOT use 'pick_up'.
+    4. BRING/MOVE SEQUENCE:
+       - Phase 1: navigate_to (position NEXT TO object)
+       - Phase 2: pick_up (object_id)
+       - Phase 3: navigate_to (position NEXT TO destination)
+       - Phase 4: place_at (destination_x, destination_y, destination_z)
     5. USER POSITION: If the user says "bring to me", the destination is [0, 0, 0].
     
     EXAMPLE:

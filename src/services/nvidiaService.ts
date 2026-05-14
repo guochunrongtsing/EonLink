@@ -81,10 +81,10 @@ export async function decomposeTaskNvidia(prompt: string, environmentState: stri
     ${correctionContext ? `\nCRITICAL: PREVIOUS ATTEMPT FAILED. FEEDBACK: ${correctionContext}` : ""}
     
     TACTICAL SOP:
-    1. PROXIMITY MANDATE: You MUST perform 'navigate_to' the object's (x,z) before any manipulation.
-    2. STATE AWARENESS: If the robot is already carrying the target object, skip navigate-to-object and pick_up. Go directly to destination.
-    3. BRING/MOVE TEMPLATE: [Navigate to Obj] -> [Pick Up] -> [Navigate to Target] -> [Place].
-    4. TARGETS: Use the exact (x,y,z) coordinates provided in the environment state.
+    1. PROXIMITY & SAFETY: You MUST 'navigate_to' a position NEAR the object (offset by ~0.8m) before manipulation. NEVER navigate to the exact center.
+    2. OBSTACLE AWARENESS: If an object (cup) is on a table, navigate to a spot next to the table, not the cup's center.
+    3. BRING/MOVE SEQUENCE: [Navigate to Near-Obj] -> [Pick Up] -> [Navigate to Near-Destination] -> [Place].
+    4. STATE AWARENESS: If carrying, skip pick-up.
     
     EXAMPLE:
     Goal: "Bring me the cup"

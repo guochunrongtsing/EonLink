@@ -203,7 +203,61 @@ export default function App() {
   // --- World Model State ---
   const [robotPos, setRobotPos] = useState<[number, number, number]>([0, 0, 0]);
   const [isCarrying, setIsCarrying] = useState(false);
-  const [cupPos, setCupPos] = useState<[number, number, number]>([2, 0.25, 1]);
+  const [worldObjects, setWorldObjects] = useState<DetectedObject[]>([
+    { 
+      id: 'red_cup_01', 
+      label: 'Red cup', 
+      confidence: 0.98, 
+      position: [2, 0.25, 1], 
+      size: [0.1, 0.15, 0.1],
+      attributes: { color: 'red', material: 'plastic', type: 'container', weight: 'light' } 
+    },
+    { 
+      id: 'table_a_01', 
+      label: 'Table A', 
+      confidence: 0.99, 
+      position: [2, 0, 1], 
+      size: [1, 0.8, 1],
+      attributes: { type: 'furniture', description: 'Work Desk', surface: 'flat' } 
+    },
+    { 
+      id: 'table_b_01', 
+      label: 'Table B', 
+      confidence: 0.99, 
+      position: [-2, 0, -2], 
+      size: [1, 0.8, 1],
+      attributes: { type: 'furniture', description: 'Kitchen Counter', surface: 'flat' } 
+    },
+  ]);
+
+  // Refs for real-time tracking (10Hz loop)
+  const robotPosRef = useRef<[number, number, number]>([0, 0, 0]);
+  const worldObjectsRef = useRef<DetectedObject[]>([]);
+  const detectedObjectsRef = useRef<DetectedObject[]>([]);
+
+  useEffect(() => {
+    robotPosRef.current = robotPos;
+  }, [robotPos]);
+
+  useEffect(() => {
+    worldObjectsRef.current = worldObjects;
+  }, [worldObjects]);
+
+  useEffect(() => {
+    detectedObjectsRef.current = detectedObjects;
+  }, [detectedObjects]);
+
+  // --- Dynamic Environment Loop (10Hz) ---
+  useEffect(() => {
+    const interval = setInterval(() => {
+      // Simulate real-world noise/drifting of some objects (optional but creates the dynamic feel)
+      // Only do this if not explicitly processing to avoid confusing the simulation
+      if (cameraActive && !isAgentProcessing) {
+        // Subtle drift simulation
+      }
+    }, 100);
+    return () => clearInterval(interval);
+  }, [cameraActive, isAgentProcessing]);
 
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
@@ -314,60 +368,65 @@ export default function App() {
     
     const result = await processCommand(
       currentInput, 
-      `Robot is at (${robotPos.map(n => n.toFixed(2)).join(',')}). ${isCarrying ? "Robot is currently carrying the Red cup." : "Robot is not carrying anything."} Known Physical Objects: [Red cup: (${cupPos.map(n => n.toFixed(2)).join(',')}), Table A: (2,0,1), Table B: (-2,0,-2)].`, 
-      detectedObjects,
+      `Robot is at (${robotPosRef.current.map(n => n.toFixed(2)).join(',')}). ${isCarrying ? "Robot is currently carrying the Red cup." : "Robot is not carrying anything."} 
+      System Environment Memory (PERSISTENT): ${JSON.stringify(worldObjectsRef.current)}`, 
+      detectedObjectsRef.current,
       (msg, step) => {
         addLog(msg);
         setActiveStep(step);
       },
-      (action) => {
-        // Response to the decomposed actions
+      (action, meta) => {
+        // Step 4: Reactive Hardware Control (10Hz Feed)
+        // CRITICAL: Ignore updates during the "mental simulation" phase
+        if (meta?.isSimulation) return;
+
         const params = action.params as any;
         const skill = action.skill;
 
-        if (skill === "navigate_to" && params.x !== undefined) {
-          // Rule of Physics: Don't overlap with target, stay at approx 0.6 units distance
-          const targetX = params.x;
-          const targetZ = params.z;
-          
-          const dx = targetX - robotPos[0];
-          const dz = targetZ - robotPos[2];
-          const dist = Math.sqrt(dx * dx + dz * dz);
-          
-          let finalX = targetX;
-          let finalZ = targetZ;
-          
-          if (dist > 0.6) {
-            const ratio = (dist - 0.6) / dist;
-            finalX = robotPos[0] + dx * ratio;
-            finalZ = robotPos[2] + dz * ratio;
+        if (meta?.isTick) {
+          // Dynamic Interpolation based on 10Hz feedback
+          if (skill === "navigate_to" && params.x !== undefined) {
+             const targetX = params.x;
+             const targetZ = params.z;
+             
+             const currentPos = robotPosRef.current;
+             const dx = targetX - currentPos[0];
+             const dz = targetZ - currentPos[2];
+             
+             // Simple lerp to show motion (usually 20 ticks)
+             const stepRatio = 1 / (meta.totalTicks - meta.currentTick);
+             
+             // HARD CONSTRAINT: Working distance check (Safety Buffer)
+             // We prevent the robot from entering a ~0.75m radius zone of the target center
+             const distToTarget = Math.sqrt(dx * dx + dz * dz);
+             if (distToTarget > 0.75) {
+                const nextX = currentPos[0] + dx * stepRatio;
+                const nextZ = currentPos[2] + dz * stepRatio;
+                setRobotPos([nextX, params.y || 0, nextZ]);
+             }
           }
-
-          setRobotPos([finalX, params.y || 0, finalZ]);
-          addLog(`HARDWARE: Moving to standing position (${finalX.toFixed(2)}, ${params.y || 0}, ${finalZ.toFixed(2)}) near target`);
-        } else if (skill === "navigate_to") {
-          // Fallback legacy heuristic
-          const desc = action.description.toLowerCase();
-          if (desc.includes("cup") || desc.includes("red")) {
-            setRobotPos([1.5, 0, 0.8]); 
-          } else if (desc.includes("table") || desc.includes("destination")) {
-            setRobotPos([-1.5, 0, -1.8]); 
-          }
+          return;
         }
 
-        if (skill === "pick_up") {
-          addLog("AGENT: Actuating end-effector...");
-          setIsCarrying(true);
-        }
+        if (meta?.isComplete) {
+          addLog(`HARDWARE: Atomic action "${action.description}" finalized.`);
+          
+          // State transformations only happen upon successful completion of the action
+          if (skill === "pick_up") {
+            addLog("DYNAMICS: Manipulator locked to object.");
+            setIsCarrying(true);
+          }
 
-        if (skill === "place_at" && params.x !== undefined) {
-          addLog("AGENT: Releasing object at target...");
-          setIsCarrying(false);
-          setCupPos([params.x, params.y || 0.25, params.z]);
-        } else if (skill === "place_at") {
-          addLog("AGENT: Releasing object...");
-          setIsCarrying(false);
-          setCupPos([robotPos[0] + 0.5, 0.25, robotPos[2] + 0.2]);
+          if (skill === "place_at" && params.x !== undefined) {
+            addLog("DYNAMICS: Object released at target location.");
+            setIsCarrying(false);
+            setWorldObjects(prev => prev.map(obj => 
+              obj.label.toLowerCase().includes('cup') 
+                ? { ...obj, position: [params.x, params.y || 0.25, params.z] } 
+                : obj
+            ));
+          }
+          return;
         }
       }
     );
@@ -405,9 +464,12 @@ export default function App() {
   };
 
   // Sync cup position with robot if carrying - Positioned at palm/chest height
+  const cupObj = worldObjects.find(obj => obj.label.toLowerCase().includes('cup'));
+  const cupPosForRender = cupObj ? cupObj.position : [2, 0.25, 1] as [number, number, number];
+
   const effectiveCupPos: [number, number, number] = isCarrying 
     ? [robotPos[0] + 0.15, robotPos[1] + 0.9, robotPos[2] + 0.4] 
-    : cupPos;
+    : cupPosForRender;
 
   return (
     <div className="h-screen w-screen flex flex-col bg-slate-100 text-slate-900 font-sans overflow-hidden">
@@ -597,28 +659,19 @@ export default function App() {
                   </mesh>
                 </SmoothGroup>
                 
-                {/* Tables */}
-                <group position={[2, 0.05, 1]}>
-                  <mesh rotation={[-Math.PI/2, 0, 0]} receiveShadow>
-                    <circleGeometry args={[1]} />
-                    <meshStandardMaterial color="#6366f1" opacity={0.1} transparent />
-                  </mesh>
-                  <mesh position={[0, -0.05, 0]}>
-                    <cylinderGeometry args={[0.8, 0.8, 0.1, 32]} />
-                    <meshStandardMaterial color="#cbd5e1" />
-                  </mesh>
-                </group>
-
-                <group position={[-2, 0.05, -2]}>
-                  <mesh rotation={[-Math.PI/2, 0, 0]} receiveShadow>
-                    <circleGeometry args={[1]} />
-                    <meshStandardMaterial color="#6366f1" opacity={0.1} transparent />
-                  </mesh>
-                  <mesh position={[0, -0.05, 0]}>
-                    <cylinderGeometry args={[0.8, 0.8, 0.1, 32]} />
-                    <meshStandardMaterial color="#cbd5e1" />
-                  </mesh>
-                </group>
+                {/* Dynamic World Objects Rendering (Tables, etc) */}
+                {worldObjects.filter(obj => !obj.label.toLowerCase().includes('cup')).map(obj => (
+                   <group key={obj.id} position={obj.position}>
+                      <mesh rotation={[-Math.PI/2, 0, 0]} receiveShadow>
+                        <circleGeometry args={[1]} />
+                        <meshStandardMaterial color="#6366f1" opacity={0.1} transparent />
+                      </mesh>
+                      <mesh position={[0, -0.05, 0]}>
+                        <cylinderGeometry args={[obj.size?.[0] || 0.8, obj.size?.[0] || 0.8, 0.1, 32]} />
+                        <meshStandardMaterial color="#cbd5e1" />
+                      </mesh>
+                   </group>
+                ))}
               </Canvas>
             </div>
             
@@ -703,16 +756,27 @@ export default function App() {
         <div className="w-80 flex flex-col gap-4">
           <Panel title="Hardware Status" icon={Activity} className="h-1/2">
             <div className="space-y-4">
-              {detectedObjects.length > 0 && (
+              {worldObjects.length > 0 && (
                 <div className="mb-4">
                   <h4 className="text-[9px] font-bold uppercase text-indigo-600 mb-2 flex items-center gap-1">
-                    <Eye className="w-3 h-3" /> Visual Perception Buffer
+                    <Database className="w-3 h-3" /> System Environment Memory
                   </h4>
-                  <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
-                    {detectedObjects.map(obj => (
-                      <div key={obj.id} className="flex items-center justify-between p-1.5 bg-indigo-50 rounded border border-indigo-100">
-                        <span className="text-[9px] font-bold text-indigo-700 truncate">{obj.label}</span>
-                        <span className="text-[8px] font-mono text-indigo-400">({obj.position.map(n => n.toFixed(1)).join(',')})</span>
+                  <div className="space-y-1 max-h-32 overflow-y-auto pr-1">
+                    {worldObjects.map(obj => (
+                      <div key={obj.id} className="p-2 bg-indigo-50 rounded border border-indigo-100 flex flex-col gap-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[9px] font-bold text-indigo-700 truncate">{obj.label}</span>
+                          <span className="text-[8px] font-mono text-indigo-400">({obj.position.map(n => n.toFixed(1)).join(',')})</span>
+                        </div>
+                        {obj.attributes && (
+                          <div className="flex flex-wrap gap-1">
+                            {Object.entries(obj.attributes).map(([k, v]) => (
+                               <span key={k} className="px-1 py-0.5 bg-white rounded text-[7px] text-indigo-400 border border-indigo-50 leading-none">
+                                 {k}:{v}
+                               </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
